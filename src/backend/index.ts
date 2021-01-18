@@ -66,11 +66,13 @@ const indexData: RequestHandler = async (req, res) => {
 const indexPost: RequestHandler<any, any, { templateId: string, variables: any, channels: any }> = async (req, res) => {
   try {
     const { templateId, variables, channels } = req.body;
+    const android = channels.android_channel
+    const ios = channels.ios_channel
     const result = await fetchAirship().post('/api/templates/push', {
-      device_types: [ "android" ],
+      device_types: [ android ? "android" : "ios" ],
       template: templateId,
       audience: {
-        android_channel: channels.android_channel
+        [android ? 'android_channel' : 'ios_channel']: android ?? ios
       },
       merge_data: {
         template_id: templateId,

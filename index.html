@@ -37,14 +37,15 @@
       `
     };
   
-    const Template = ({ channelId, name, description, variables = [], id }) => {
+    const Template = ({ device, name, description, variables = [], id }) => {
       const [state, setState] = useState(null)
       
       useEffect(() => {
         if (state) {
+          const { id, type } = device
           const payload = {
             channels: {
-              android_channel: channelId,
+              [`${type}_channel`]: id,
             },
             templateId: id,
             variables: state
@@ -86,7 +87,7 @@
               />
             </li>`
           )}</ul>
-          <input type="submit" disabled=${channelId == null} />
+          <input type="submit" disabled=${device == null} />
         </form>
       `
     }
@@ -206,9 +207,10 @@
     }
 
     const App = ({ page }) => {
-      const [deviceId, setDeviceId] = useState(() => {
-        const foundId = localStorage.getItem('airship-devtools-channel-id')
-        return foundId ?? null;
+      const [device, setDevice] = useState(() => {
+        const foundDevice = localStorage.getItem('airship-devtools-channel-id')
+        console.log(foundDevice)
+        return foundDevice ? JSON.parse(foundDevice) : null;
       })
 
       const [isRefreshing, setRefresh] = useState(false)
@@ -244,24 +246,37 @@
       }, [isRefreshing])
 
       useEffect(() => {
-        if (deviceId) localStorage.setItem('airship-devtools-channel-id', deviceId)
-      }, [deviceId])
+        console.log(device)
+        if (device) localStorage.setItem('airship-devtools-channel-id', JSON.stringify(device))
+      }, [device])
 
-      console.log(templates.map(getTemplateName))
-      console.log(matchTemplates(templates))
-
+      // console.log(templates.map(getTemplateName))
+      // console.log(matchTemplates(templates))
+      console.log(device)
       return html`
         <div class="app">
           <${Header} />
-          <p>${deviceId ?? 'No device added'}</p>
+          <p>${device?.id ?? 'No device added'}</p>
+          ${device ? `Device type: ${device.type}` : null}
           <form onSubmit=${(e) => {
             e.preventDefault()
-            const [, id] = [...(new FormData(e.target)).entries()][0]
-            setDeviceId(id)
+            const { channel_id, channel_type } = Object.fromEntries([...(new FormData(e.target)).entries()])
+            setDevice({
+              id: channel_id,
+              type: channel_type
+            })
             e.target.reset()
           }}>
-            <label for="channel_id">${deviceId ? 'Change' : 'Add'} device channel_id</label>
-            <input name="channel_id" />
+            <div>
+              <label for="channel_id">${device ? 'Change' : 'Add'} device channel_id</label>
+              <input required id="channel_id" name="channel_id" />
+            </div>
+            <div>
+              <label for="ios">ios</label>
+              <input required id="ios" name="channel_type" type="radio" value="ios"/>
+              <label for="android">android</label>
+              <input required for="android" name="channel_type" type="radio" value="android"/>
+            </div>
             <input type="submit" />
           </form>
           <p>See how to capture your devices channel_id here: <a href="https://support.airship.com/hc/en-us/articles/360006723352-How-to-find-the-Channel-ID-using-the-Channel-Capture-Tool">Channel Capturing Tool</a></p>
@@ -269,7 +284,7 @@
             ${templates.map(template => html`
               <li key="${template.id}">
                 <${Template}
-                  channelId=${deviceId}
+                  device=${device}
                   name=${template.name}
                   description=${template.description} 
                   variables=${template.variables}
