@@ -1,0 +1,287 @@
+<!DOCTYPE html>
+<html lang="en">
+  <title>htm Demo</title>
+  <script type="module">
+    import {
+      html,
+      Component,
+      render,
+      useEffect,
+      useState
+    } from 'https://unpkg.com/htm/preact/standalone.module.js';
+    /*
+    need to use this to find your devices channel id..
+    https://support.airship.com/hc/en-us/articles/360006723352-How-to-find-the-Channel-ID-using-the-Channel-Capture-Tool
+    {...
+      audience: {
+        OR: {
+          android_channel: channel_id
+          ios_channel: channel_id
+        }
+      }
+    ...}
+    */
+    const Header = ({ name }) => html`<h1>Airship devtools</h1>`
+
+    const Variable = ({ formKey, name, description }) => {
+      return html`
+        <div>
+          ${description ? html`
+            <details>
+              <summary><label for=${formKey}>${name}</label></summary>
+              ${description}
+            </details>
+            ` : html`<label for=${formKey}>${name}</label>`}
+          <input name=${formKey} />
+        </div>
+      `
+    };
+  
+    const Template = ({ channelId, name, description, variables = [], id }) => {
+      const [state, setState] = useState(null)
+      
+      useEffect(() => {
+        if (state) {
+          const payload = {
+            channels: {
+              android_channel: channelId,
+            },
+            templateId: id,
+            variables: state
+          }
+          fetch('http://localhost:4444', {
+            method: 'POST',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+            body: JSON.stringify(payload)
+          }).then(result => console.log('Success!'))
+          .catch(error => console.log('error'))
+          console.log(state)
+        }
+      }, [state])
+
+      return html`
+        <form onSubmit=${(e) => {
+          e.preventDefault()
+          const data = Object.fromEntries((new FormData(e.target)).entries())
+          setState(data)
+        }}>
+          <h5>${name}</h5>
+          <h6>${id}</h6>
+          ${description && html`
+            <details>
+             <summary>Details</summary>
+              ${description}
+            </details>`
+          }
+          <p>Variables</p>
+          <ul>${variables.map(variable => html`
+            <li>
+              <${Variable}
+                key=${variable.key}
+                formKey=${variable.key}
+                name=${variable.name}
+                description=${variable.description}
+              />
+            </li>`
+          )}</ul>
+          <input type="submit" disabled=${channelId == null} />
+        </form>
+      `
+    }
+
+    const getTemplateName = template => template.name.substring(4)
+    const getTemplateLang = template => template.name.substring(0, 2).toLowerCase()
+
+    const checkIfMatch = (a, b) => {
+      console.group()
+      if (a.description != b.description) console.warn(`description mismatch in template '${a.name}'`)
+
+      if (a.variables == null && b.variables != null || a.variables != null && b.variables == null) {
+        console.warn(
+          `variable mismatch in template ${a.name}`,
+          `'${a.variables == null ? a.lang : b.lang}' is missing variable object`  
+        )
+        console.groupEnd()
+        return;
+      }
+      if (a.variables == null && b.variables == null) {
+        console.groupEnd()
+        return;
+      }
+      const aVars = [...a.variables]
+      const bVars = [...b.variables]
+      if (aVars?.length !== bVars?.length)
+        console.warn(
+          `variable mismatch in template ${a.name}`,
+          `inconsistent number of variables`,
+          `${a.lang}: ${aVars.length}`  
+          `${b.lang}: ${bVars.length}`,  
+        )
+
+      const aKeys = aVars.map(variable => variable.key)
+      const bKeys = bVars.map(variable => variable.key)
+
+      aKeys.forEach(key => {
+        if (!bKeys.includes(key)) {
+          console.warn(
+          `variable mismatch in template ${a.name}`,
+          `Missing key ${key} in '${b.lang}'`
+        )
+        }
+      })
+
+      bKeys.forEach(key => {
+        if (!aKeys.includes(key)) {
+          console.warn(
+          `variable mismatch in template ${a.name}`,
+          `Missing key ${key} in '${a.lang}'`
+        )
+        }
+      })
+      console.groupEnd()
+    }
+    const matchTemplates = templates => {
+      // extract all template with specified languages
+      const localizedTemplates = templates.filter(template => (
+         template.name.toLowerCase().startsWith('en:')
+      || template.name.toLowerCase().startsWith('is:')
+      // sort them so that english is on top
+      )).sort(template => template.name.toLowerCase().startsWith('en') ? -1 : 1)
+      .map(template => ({
+        ...template,
+        name: getTemplateName(template),
+        lang: getTemplateLang(template)
+      }))
+      const icelandicIndex = localizedTemplates.findIndex(template => template.lang === 'is')
+      // splice deletes 0-idx from the english array, and returns an array with the deleted templates
+      const englishTemplates = [...localizedTemplates]
+      const icelandicTemplates = englishTemplates.splice(0, icelandicIndex)
+
+      const shorter = englishTemplates.length > icelandicTemplates.length ? icelandicTemplates : englishTemplates
+      const longer = englishTemplates.length <= icelandicTemplates.length ? icelandicTemplates : englishTemplates
+
+      const matched = longer.map(template => {
+        const _template = shorter.find(t => template.name.toLowerCase() === t.name.toLowerCase()) ?? {
+          lang: template.lang === 'en' ? 'is' : 'en',
+          variables: null,
+          description: null,
+          didNotExist: true
+        }
+        if (_template.didNotExist) console.warn(`Did not find corresponding language match for ${template.lang}: ${template.name}`)
+        const {name, variables, description, lang, ...rest} = template
+        const {
+          variables: _variables, 
+          description: _description, 
+          lang: _lang,
+          ..._rest
+        } = _template
+
+        checkIfMatch(template, _template)
+        
+        return {
+          name: template.name,
+          variables: template.variables,
+          description: template.description,
+          [lang]: rest,
+          [_lang]: _rest.didNotExist ? null : _rest
+        }
+      })
+
+      shorter.forEach(template => {
+        const found = matched.find(_template => _template[template.lang] != null)
+        if (found == null) console.warn(`Did not find corresponding language match for ${template.lang}: ${template.name}`)
+      })
+
+      return matched
+    }
+
+    const sortTemplate = (a, b) => {
+      if (a.name?.includes('test') || a.description?.includes('test')) {
+        if (b.name?.includes('test') || b.description?.includes('test')) return 0
+        return 1
+      }
+      return -1
+    }
+
+    const App = ({ page }) => {
+      const [deviceId, setDeviceId] = useState(() => {
+        const foundId = localStorage.getItem('airship-devtools-channel-id')
+        return foundId ?? null;
+      })
+
+      const [isRefreshing, setRefresh] = useState(false)
+      const [templates, setTemplates] = useState([])
+      const [loading, setLoading] = useState(false)
+      useEffect(() => {
+        let mounted = true
+        const cached = localStorage.getItem('airship-devtools-templates')
+        const cachedAt = localStorage.getItem('airship-devtools-templates-timestamp') || (new Date()).getTime()
+        const isStale = (new Date()).getTime() - cachedAt > 3600000 // 1 hour
+        if (cached && !isStale && !isRefreshing) {
+          console.log('getting from cache')
+          setTemplates(JSON.parse(cached))
+        } else {
+          console.log('getting from web')
+          setLoading(true)
+          const results = fetch('http://localhost:4444')
+          .then(r => r.json())
+          .then(json => {
+            json.sort(sortTemplate)
+            localStorage.setItem('airship-devtools-templates', JSON.stringify(json))
+            const timestamp = new Date()
+            localStorage.setItem('airship-devtools-templates-timestamp', timestamp.getTime());
+            if (mounted) setTemplates(json)
+          })
+          .catch(error => console.error(error))
+          .finally(_ => {
+            setLoading(false)
+            setRefresh(false)
+          })
+        }
+        return () => { mounted = false }
+      }, [isRefreshing])
+
+      useEffect(() => {
+        if (deviceId) localStorage.setItem('airship-devtools-channel-id', deviceId)
+      }, [deviceId])
+
+      console.log(templates.map(getTemplateName))
+      console.log(matchTemplates(templates))
+
+      return html`
+        <div class="app">
+          <${Header} />
+          <p>${deviceId ?? 'No device added'}</p>
+          <form onSubmit=${(e) => {
+            e.preventDefault()
+            const [, id] = [...(new FormData(e.target)).entries()][0]
+            setDeviceId(id)
+            e.target.reset()
+          }}>
+            <label for="channel_id">${deviceId ? 'Change' : 'Add'} device channel_id</label>
+            <input name="channel_id" />
+            <input type="submit" />
+          </form>
+          <p>See how to capture your devices channel_id here: <a href="https://support.airship.com/hc/en-us/articles/360006723352-How-to-find-the-Channel-ID-using-the-Channel-Capture-Tool">Channel Capturing Tool</a></p>
+          <ul>
+            ${templates.map(template => html`
+              <li key="${template.id}">
+                <${Template}
+                  channelId=${deviceId}
+                  name=${template.name}
+                  description=${template.description} 
+                  variables=${template.variables}
+                  id=${template.id}
+                />
+              </li>
+            `)}
+          </ul>
+          <button onClick=${() => setRefresh(true)}>Refresh templates...</button>
+        </div>
+      `;
+    }
+    render(html`<${App} page="All" />`, document.body);
+  </script>
+</html>
